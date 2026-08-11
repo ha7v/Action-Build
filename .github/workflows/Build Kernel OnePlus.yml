@@ -893,19 +893,65 @@ jobs:
             EVDI_PATCH="${RUNNER_TEMP}/evdi_drm_${KMI}.patch"
             case "$KMI" in
               android14-6.1)
-                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/fc7ae2e/droidspaces_patch/evdi_drm.patch"
+                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/main/droidspaces_patch/evdi_drm.patch"
                 ;;
               android15-6.6)
-                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8750/21db9e7d547ca625bd5aa734fb5dfc8b94ea48ef/droidspaces_patch/evdi_drm.patch"
+                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8750/main/droidspaces_patch/evdi_drm.patch"
                 ;;
               *)
                 echo "DroidSpaces extend supports android14-6.1 and android15-6.6 only (current: $KMI)"
                 exit 10
                 ;;
             esac
-            curl -fL --retry 3 "$EVDI_URL" -o "$EVDI_PATCH"
-            echo "dc971b7808aa646cfeaffde5fd7f12e3de7b7edda1383c62dd0d5c5ce4cc40ac  $EVDI_PATCH" | sha256sum -c -
+            curl -fL --retry 3 --retry-all-errors "$EVDI_URL" -o "$EVDI_PATCH"
             patch -p1 --forward < "$EVDI_PATCH"
+
+            # Bazel requires every generated module to be declared explicitly.
+            # The upstream Make-based builders do not need this declaration.
+            python3 - <<'PY'
+          from pathlib import Path
+
+          build_file = Path("BUILD.bazel")
+          module = 'drivers/bluetooth/hci_vhci.ko'
+          lines = build_file.read_text().splitlines(keepends=True)
+          result = []
+          in_module_outs = False
+          depth = 0
+          module_outs = []
+          module_outs_count = 0
+          inserted = 0
+
+          for line in lines:
+              if not in_module_outs and 'module_outs = [' in line:
+                  in_module_outs = True
+                  depth = line.count('[') - line.count(']')
+                  module_outs = [line]
+                  module_outs_count += 1
+                  continue
+
+              if in_module_outs:
+                  module_outs.append(line)
+                  next_depth = depth + line.count('[') - line.count(']')
+                  if next_depth == 0:
+                      if not any(module in entry for entry in module_outs):
+                          indent = line[:len(line) - len(line.lstrip())]
+                          module_outs.insert(-1, f'{indent}    "{module}",\n')
+                          inserted += 1
+                      result.extend(module_outs)
+                      in_module_outs = False
+                  depth = next_depth
+                  continue
+
+              result.append(line)
+
+          if in_module_outs:
+              raise SystemExit("Unterminated module_outs list in common/BUILD.bazel")
+          if not module_outs_count:
+              raise SystemExit("No module_outs list found in common/BUILD.bazel")
+
+          build_file.write_text(''.join(result))
+          print(f'Added {module} to {inserted} module_outs list(s)')
+          PY
           fi
           source $REJ_CHECKER
           check_rejects .
