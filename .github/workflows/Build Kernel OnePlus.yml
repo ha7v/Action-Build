@@ -823,7 +823,7 @@ jobs:
       - name: Apply CVE_2026_43499 RTMUTEX fix
         if: ${{ env.KMI == 'android14-6.1' }}
         run: |
-          PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches"
           cd kernel_workspace/kernel_platform/common
           patch -p1 -F 3 < "${PATCH_DIR}/cve-2026-43499-rtmutex-6.1.patch"
           source $REJ_CHECKER
@@ -918,30 +918,88 @@ jobs:
             # Bazel requires every generated module to be declared explicitly.
             # The upstream Make-based builders do not need this declaration.
             python3 - <<'PY'
-          import re
           from pathlib import Path
 
           build_file = Path("BUILD.bazel")
-          module = 'drivers/bluetooth/hci_vhci.ko'
+          module = "drivers/bluetooth/hci_vhci.ko"
+          targets = ("kernel_aarch64", "kernel_aarch64_16k")
           content = build_file.read_text()
 
-          for target in ("kernel_aarch64", "kernel_aarch64_16k"):
-              pattern = re.compile(
-                  rf'(?P<prefix>^\s*"{target}": \{{.*?^\s*"module_implicit_outs":\s*)'
-                  r'(?P<value>[^,\n]+)(?P<suffix>,)$',
-                  re.MULTILINE | re.DOTALL,
-              )
-              match = pattern.search(content)
-              if not match:
-                  raise SystemExit(f"No module_implicit_outs found for {target}")
-              if module in match.group("value"):
-                  continue
-              content = content[:match.start("value")] + (
-                  match.group("value") + f' + ["{module}"]'
-              ) + content[match.end("value"):]
+          def target_block(text, target):
+              marker = f'"{target}": {{'
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f"No target config found for {target}")
+              opening = text.find("{", start)
+              depth = 0
+              in_string = False
+              escaped = False
+              for pos in range(opening, len(text)):
+                  char = text[pos]
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif char == "\\":
+                          escaped = True
+                      elif char == '"':
+                          in_string = False
+                  elif char == '"':
+                      in_string = True
+                  elif char == "{":
+                      depth += 1
+                  elif char == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return start, pos + 1
+              raise SystemExit(f"Unterminated target config for {target}")
 
+          replacements = []
+          for target in targets:
+              start, end = target_block(content, target)
+              block = content[start:end]
+              field = block.find('"module_implicit_outs":')
+              if field < 0:
+                  raise SystemExit(f"No module_implicit_outs found for {target}")
+              value_start = field + len('"module_implicit_outs":')
+              depth = 0
+              in_string = False
+              escaped = False
+              value_end = None
+              for pos in range(value_start, len(block)):
+                  char = block[pos]
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif char == "\\":
+                          escaped = True
+                      elif char == '"':
+                          in_string = False
+                  elif char == '"':
+                      in_string = True
+                  elif char in "([{":
+                      depth += 1
+                  elif char in ")]}":
+                      depth -= 1
+                  elif char == "," and depth == 0:
+                      value_end = pos
+                      break
+              if value_end is None:
+                  raise SystemExit(f"Could not parse module_implicit_outs for {target}")
+              value = block[value_start:value_end]
+              if module not in value:
+                  replacements.append((start + value_end, f' + ["{module}"]'))
+
+          for pos, suffix in reversed(replacements):
+              content = content[:pos] + suffix + content[pos:]
           build_file.write_text(content)
-          print(f'Added {module} to the common 4K and 16K Bazel targets')
+
+          for target in targets:
+              start, end = target_block(content, target)
+              block = content[start:end]
+              field = block.find('"module_implicit_outs":')
+              if field < 0 or module not in block[field:end]:
+                  raise SystemExit(f"{module} missing from {target} module_implicit_outs")
+          print(f"Verified {module} in common 4K and 16K Bazel targets")
           PY
           fi
           source $REJ_CHECKER
