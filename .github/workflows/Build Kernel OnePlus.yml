@@ -909,48 +909,30 @@ jobs:
             # Bazel requires every generated module to be declared explicitly.
             # The upstream Make-based builders do not need this declaration.
             python3 - <<'PY'
+          import re
           from pathlib import Path
 
           build_file = Path("BUILD.bazel")
           module = 'drivers/bluetooth/hci_vhci.ko'
-          lines = build_file.read_text().splitlines(keepends=True)
-          result = []
-          in_module_outs = False
-          depth = 0
-          module_outs = []
-          module_outs_count = 0
-          inserted = 0
+          content = build_file.read_text()
 
-          for line in lines:
-              if not in_module_outs and 'module_outs = [' in line:
-                  in_module_outs = True
-                  depth = line.count('[') - line.count(']')
-                  module_outs = [line]
-                  module_outs_count += 1
+          for target in ("kernel_aarch64", "kernel_aarch64_16k"):
+              pattern = re.compile(
+                  rf'(?P<prefix>^\s*"{target}": \{{.*?^\s*"module_implicit_outs":\s*)'
+                  r'(?P<value>[^,\n]+)(?P<suffix>,)$',
+                  re.MULTILINE | re.DOTALL,
+              )
+              match = pattern.search(content)
+              if not match:
+                  raise SystemExit(f"No module_implicit_outs found for {target}")
+              if module in match.group("value"):
                   continue
+              content = content[:match.start("value")] + (
+                  match.group("value") + f' + ["{module}"]'
+              ) + content[match.end("value"):]
 
-              if in_module_outs:
-                  module_outs.append(line)
-                  next_depth = depth + line.count('[') - line.count(']')
-                  if next_depth == 0:
-                      if not any(module in entry for entry in module_outs):
-                          indent = line[:len(line) - len(line.lstrip())]
-                          module_outs.insert(-1, f'{indent}    "{module}",\n')
-                          inserted += 1
-                      result.extend(module_outs)
-                      in_module_outs = False
-                  depth = next_depth
-                  continue
-
-              result.append(line)
-
-          if in_module_outs:
-              raise SystemExit("Unterminated module_outs list in common/BUILD.bazel")
-          if not module_outs_count:
-              raise SystemExit("No module_outs list found in common/BUILD.bazel")
-
-          build_file.write_text(''.join(result))
-          print(f'Added {module} to {inserted} module_outs list(s)')
+          build_file.write_text(content)
+          print(f'Added {module} to the common 4K and 16K Bazel targets')
           PY
           fi
           source $REJ_CHECKER
