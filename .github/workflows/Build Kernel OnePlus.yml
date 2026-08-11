@@ -81,6 +81,11 @@ on:
           - KPM
           - KPN
           - N/A
+      BUILTIN_KSU:
+        type: boolean
+        description: "是否内置KernelSU？关闭时保留LKM模式//Build KernelSU into the kernel? Disable for LKM mode"
+        required: true
+        default: false
       SUSFS_META:
         type: string
         description: "回退SUSFS(输入哈希或次数或-1关闭)//Rollback SUSFS (Enter commit hash, count, or -1 to disable)"
@@ -178,7 +183,7 @@ on:
 
 jobs:
   build:
-    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
+    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "none"
@@ -643,6 +648,7 @@ jobs:
           done
 
       - name: Add KernelSU
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' }}
         run: |
           cd kernel_workspace/kernel_platform
           KSU_META="${{ github.event.inputs.KSU_META }}"
@@ -673,7 +679,7 @@ jobs:
           sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
 
       - name: Apply Fake Patches
-        if: ${{ github.event.inputs.SUSFS_META != '-1' }}
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.SUSFS_META != '-1' }}
         run: |
           kotlinc -script "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/PatchFakePatches.kts" apply "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/common"
 
@@ -682,7 +688,7 @@ jobs:
           FILE: ${{ github.event.inputs.FILE }}
         run: |
           cd kernel_workspace
-          if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ] && [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             SUSFS_META="${{ github.event.inputs.SUSFS_META }}"
             git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}${{ github.event.inputs.SUSFS_DEV == 'true' && '-dev' || '' }}
             cd susfs4ksu
@@ -705,7 +711,7 @@ jobs:
           fi
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           cd kernel_platform
-          if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ] && [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             echo "正在拉取susfs补丁"
             cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
             cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
@@ -721,7 +727,7 @@ jobs:
             cp -r ../SukiSU_patch/other/zram/lz4k_oplus ./common/lib/
           fi
 
-          if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ] && [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             cd ./KernelSU
             sed -i 's|kernel/Makefile|kernel/Kbuild|g' ./10_enable_susfs_for_ksu.patch
             patch -p1 < 10_enable_susfs_for_ksu.patch || true
@@ -737,7 +743,7 @@ jobs:
             echo "fix_5.15_patch完成"
           fi
 
-          if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ] && [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             echo "正在打susfs补丁"
             patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             echo "susfs_patch完成"
@@ -746,7 +752,7 @@ jobs:
           check_rejects .
 
       - name: Revert Fake Patches
-        if: ${{ github.event.inputs.SUSFS_META != '-1' }}
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.SUSFS_META != '-1' }}
         run: |
           kotlinc -script "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/PatchFakePatches.kts" postfix "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/common"
           kotlinc -script "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/PatchFakePatches.kts" revert "$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/common"
@@ -986,31 +992,29 @@ jobs:
           }
           trap 'inject_fake_config' EXIT
 
-          # KernelSU配置
-          set_config "CONFIG_KSU=y"
+          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ]; then
+            set_config "CONFIG_KSU=y"
 
-          # KPM配置
-          if [ "${{ github.event.inputs.KPM }}" = "KPM" ] || [ "${{ github.event.inputs.KPM }}" = "N/A" ]; then
-            set_config "CONFIG_KPM=y"
-          fi
-          if [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
-            set_config "CONFIG_KPM=n"
-          fi
+            if [ "${{ github.event.inputs.KPM }}" = "KPM" ] || [ "${{ github.event.inputs.KPM }}" = "N/A" ]; then
+              set_config "CONFIG_KPM=y"
+            elif [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
+              set_config "CONFIG_KPM=n"
+            fi
 
-          # SUSFS配置
-          if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
-            set_config "CONFIG_KSU_SUSFS=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_MAP=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-            set_config "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            set_config "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
-            set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
-            set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
-            set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-          else
-            set_config "CONFIG_KSU_SUSFS=n"
+            if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+              set_config "CONFIG_KSU_SUSFS=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_PATH=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_MAP=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+              set_config "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+              set_config "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
+              set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+              set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+              set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+            else
+              set_config "CONFIG_KSU_SUSFS=n"
+            fi
           fi
 
           # TMPFS配置*
@@ -1397,7 +1401,7 @@ jobs:
           fi
 
       - name: Apply KPX and Replace Image
-        if: ${{ github.event.inputs.KPM != 'N/A' }}
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM != 'N/A' }}
         run: |
           KPM_DIR="${GITHUB_WORKSPACE}/kernel_workspace/SukiSU_patch/kpm"
           # KPM_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches/kpm"
@@ -1417,7 +1421,7 @@ jobs:
           cp Image "${GITHUB_WORKSPACE}/AnyKernel3/Image"
 
       - name: Download Latest SUSFS Module from CI
-        if: ${{ github.event.inputs.SUSFS_CI == 'CI' && github.event.inputs.SUSFS_META != '-1' }}
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.SUSFS_CI == 'CI' && github.event.inputs.SUSFS_META != '-1' }}
         continue-on-error: true
         run: |
           LATEST_RUN_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -1437,13 +1441,14 @@ jobs:
           fi
 
       - name: Download Latest SUSFS Module from Release
-        if: ${{ github.event.inputs.SUSFS_CI == 'Release' && github.event.inputs.SUSFS_META != '-1' }}
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.SUSFS_CI == 'Release' && github.event.inputs.SUSFS_META != '-1' }}
         continue-on-error: true
         run: |
           wget -O ksu_module_susfs_1.5.2+_Release.zip https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip
           cp ksu_module_susfs_1.5.2+_Release.zip ./AnyKernel3/
 
       - name: Download Latest KernelSU APK from CI
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1472,12 +1477,12 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
         with:
-          name: AnyKernel3_KernelSU_${{ env.KSUVER }}_${{ steps.extract_info.outputs.value }}(${{ env.CKERNEL_VERSION }})${{ steps.suffix.outputs.value }}
+          name: AnyKernel3_${{ github.event.inputs.BUILTIN_KSU == 'true' && 'KernelSU' || 'LKM' }}_${{ steps.extract_info.outputs.value }}(${{ env.CKERNEL_VERSION }})${{ steps.suffix.outputs.value }}
           path: ./AnyKernel3/*
 
       - name: Extract and Process ZRAM Module
