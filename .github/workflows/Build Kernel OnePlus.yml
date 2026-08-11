@@ -823,9 +823,9 @@ jobs:
       - name: Apply CVE_2026_43499 RTMUTEX fix
         if: ${{ env.KMI == 'android14-6.1' }}
         run: |
-          PATCH_DIR="${GITHUB_WORKSPACE}/patches"
           cd kernel_workspace/kernel_platform/common
-          patch -p1 -F 3 < "${PATCH_DIR}/cve-2026-43499-rtmutex-6.1.patch"
+          PATCH_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/main/other_patch/cve-2026-43499-rtmutex-6.1.patch"
+          curl -fL --retry 3 --retry-all-errors "$PATCH_URL" | patch -p1 -F 3
           source $REJ_CHECKER
           check_rejects .
 
