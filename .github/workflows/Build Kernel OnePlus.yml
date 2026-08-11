@@ -101,6 +101,16 @@ on:
         description: "自定义构建时间(输入F使用UTCT或-1关闭)//Custom build time (Enter F to use UTCT, or -1 to disable)"
         required: false
         default: "Fri Dec 12 11:37:03 UTC 2025"
+      BUILD_USER:
+        type: string
+        description: "内核编译用户名(留空使用构建环境默认值)//Kernel build user (empty: build environment default)"
+        required: false
+        default: ""
+      BUILD_HOST:
+        type: string
+        description: "内核编译主机名(留空使用构建环境默认值)//Kernel build host (empty: build environment default)"
+        required: false
+        default: ""
       KSU_META:
         type: string
         description: "管理器分支名(必填)/内置分支名(必填)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Rollback branch commit hash version (Leave blank to not modify)"
@@ -351,6 +361,8 @@ jobs:
           echo "Selected RE_KERNEL: ${{ github.event.inputs.RE_KERNEL }}"
           echo "Selected LZ4_UPDATE: ${{ github.event.inputs.LZ4_UPDATE }}"
           echo "Custom BUILD_TIME: $BUILD_TIME"
+          echo "Custom BUILD_USER: ${{ github.event.inputs.BUILD_USER }}"
+          echo "Custom BUILD_HOST: ${{ github.event.inputs.BUILD_HOST }}"
           echo -n "BUILD_TIME Unicode: "
           CHECK_TEXT="$BUILD_TIME" python3 "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/check_unicode_format.py" --mode build_time
           echo "Custom SUFFIX: $SUFFIX"
@@ -1139,6 +1151,12 @@ jobs:
           fi
           echo "KBUILD_BUILD_TIMESTAMP=${DATESTR}" >> "$GITHUB_ENV"
           echo "KBUILD_BUILD_VERSION=1" >> "$GITHUB_ENV"
+          if [[ -n "${{ github.event.inputs.BUILD_USER }}" ]]; then
+            echo "KBUILD_BUILD_USER=${{ github.event.inputs.BUILD_USER }}" >> "$GITHUB_ENV"
+          fi
+          if [[ -n "${{ github.event.inputs.BUILD_HOST }}" ]]; then
+            echo "KBUILD_BUILD_HOST=${{ github.event.inputs.BUILD_HOST }}" >> "$GITHUB_ENV"
+          fi
           cd kernel_workspace/kernel_platform/
           for f in ./common/scripts/mkcompile_h ./"$KERNEL_REPOS"/scripts/mkcompile_h; do
             if [ -f "$f" ]; then
