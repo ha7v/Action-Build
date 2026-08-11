@@ -167,7 +167,7 @@ on:
         default: false
       DROID_SPACES:
         type: choice
-        description: "DroidSpaces容器支持：false关闭，standard开启容器+NTSYNC，extend增加6.1专用虚拟HCI/EVDI测试支持//DroidSpaces mode"
+        description: "DroidSpaces容器支持：false关闭，standard开启容器+NTSYNC，extend为6.1/6.6增加虚拟HCI/EVDI测试支持//DroidSpaces mode"
         required: true
         default: 'false'
         options:
@@ -890,14 +890,20 @@ jobs:
           fi
 
           if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
-            if [ "$KMI" != "android14-6.1" ]; then
-              echo "DroidSpaces extend currently supports android14-6.1 only (current: $KMI)"
-              exit 10
-            fi
-            EVDI_PATCH="${RUNNER_TEMP}/evdi_drm_android14_6.1.patch"
-            curl -fL --retry 3 \
-              "https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/fc7ae2e/droidspaces_patch/evdi_drm.patch" \
-              -o "$EVDI_PATCH"
+            EVDI_PATCH="${RUNNER_TEMP}/evdi_drm_${KMI}.patch"
+            case "$KMI" in
+              android14-6.1)
+                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/fc7ae2e/droidspaces_patch/evdi_drm.patch"
+                ;;
+              android15-6.6)
+                EVDI_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8750/21db9e7d547ca625bd5aa734fb5dfc8b94ea48ef/droidspaces_patch/evdi_drm.patch"
+                ;;
+              *)
+                echo "DroidSpaces extend supports android14-6.1 and android15-6.6 only (current: $KMI)"
+                exit 10
+                ;;
+            esac
+            curl -fL --retry 3 "$EVDI_URL" -o "$EVDI_PATCH"
             echo "dc971b7808aa646cfeaffde5fd7f12e3de7b7edda1383c62dd0d5c5ce4cc40ac  $EVDI_PATCH" | sha256sum -c -
             patch -p1 --forward < "$EVDI_PATCH"
           fi
