@@ -915,92 +915,14 @@ jobs:
             curl -fL --retry 3 --retry-all-errors "$EVDI_URL" -o "$EVDI_PATCH"
             patch -p1 --forward < "$EVDI_PATCH"
 
-            # Bazel requires every generated module to be declared explicitly.
-            # The upstream Make-based builders do not need this declaration.
-            python3 - <<'PY'
-          from pathlib import Path
-
-          build_file = Path("BUILD.bazel")
-          module = "drivers/bluetooth/hci_vhci.ko"
-          targets = ("kernel_aarch64", "kernel_aarch64_16k")
-          content = build_file.read_text()
-
-          def target_block(text, target):
-              marker = f'"{target}": {{'
-              start = text.find(marker)
-              if start < 0:
-                  raise SystemExit(f"No target config found for {target}")
-              opening = text.find("{", start)
-              depth = 0
-              in_string = False
-              escaped = False
-              for pos in range(opening, len(text)):
-                  char = text[pos]
-                  if in_string:
-                      if escaped:
-                          escaped = False
-                      elif char == "\\":
-                          escaped = True
-                      elif char == '"':
-                          in_string = False
-                  elif char == '"':
-                      in_string = True
-                  elif char == "{":
-                      depth += 1
-                  elif char == "}":
-                      depth -= 1
-                      if depth == 0:
-                          return start, pos + 1
-              raise SystemExit(f"Unterminated target config for {target}")
-
-          replacements = []
-          for target in targets:
-              start, end = target_block(content, target)
-              block = content[start:end]
-              field = block.find('"module_implicit_outs":')
-              if field < 0:
-                  raise SystemExit(f"No module_implicit_outs found for {target}")
-              value_start = field + len('"module_implicit_outs":')
-              depth = 0
-              in_string = False
-              escaped = False
-              value_end = None
-              for pos in range(value_start, len(block)):
-                  char = block[pos]
-                  if in_string:
-                      if escaped:
-                          escaped = False
-                      elif char == "\\":
-                          escaped = True
-                      elif char == '"':
-                          in_string = False
-                  elif char == '"':
-                      in_string = True
-                  elif char in "([{":
-                      depth += 1
-                  elif char in ")]}":
-                      depth -= 1
-                  elif char == "," and depth == 0:
-                      value_end = pos
-                      break
-              if value_end is None:
-                  raise SystemExit(f"Could not parse module_implicit_outs for {target}")
-              value = block[value_start:value_end]
-              if module not in value:
-                  replacements.append((start + value_end, f' + ["{module}"]'))
-
-          for pos, suffix in reversed(replacements):
-              content = content[:pos] + suffix + content[pos:]
-          build_file.write_text(content)
-
-          for target in targets:
-              start, end = target_block(content, target)
-              block = content[start:end]
-              field = block.find('"module_implicit_outs":')
-              if field < 0 or module not in block[field:end]:
-                  raise SystemExit(f"{module} missing from {target} module_implicit_outs")
-          print(f"Verified {module} in common 4K and 16K Bazel targets")
-          PY
+            # CONFIG_BT=m makes HCIVHCI a module; declare that generated output to Kleaf.
+            if [ -f ../build_with_bazel.py ]; then
+              python3 "${GITHUB_WORKSPACE}/scripts/kleaf_add_module.py" \
+                --build-file BUILD.bazel \
+                --module drivers/bluetooth/hci_vhci.ko \
+                --target kernel_aarch64 \
+                --target kernel_aarch64_16k
+            fi
           fi
           source $REJ_CHECKER
           check_rejects .
