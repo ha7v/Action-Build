@@ -339,6 +339,7 @@ jobs:
 
       - name: Debug Show Selected Inputs
         env:
+          WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
           BUILD_TIME: ${{ github.event.inputs.BUILD_TIME }}
           SUFFIX: ${{ github.event.inputs.SUFFIX }}
         run: |
@@ -348,28 +349,10 @@ jobs:
           echo "Selected CPUD: ${{ env.CPUD }}"
           echo "Selected ANDROID_VERSION: ${{ env.ANDROID_VERSION }}"
           echo "Selected BUILD_METHOD: ${{ env.BUILD_METHOD }}"
-          echo "Selected FILE: ${{ github.event.inputs.FILE }}"
-          echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
-          echo "Selected KPM: ${{ github.event.inputs.KPM }}"
-          echo "Custom SUSFS_META: ${{ github.event.inputs.SUSFS_META }}"
-          echo "Custom KSU_META: ${{ github.event.inputs.KSU_META }}"
-          echo "Selected ZRAM: ${{ github.event.inputs.ZRAM }}"
-          echo "Selected LSM_BBG: ${{ github.event.inputs.LSM_BBG }}"
-          echo "Selected NETFILTER: ${{ github.event.inputs.NETFILTER }}"
-          echo "Selected CCM: ${{ github.event.inputs.CCM }}"
-          echo "Selected SUSFS_DEV: ${{ github.event.inputs.SUSFS_DEV }}"
-          echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
-          echo "Selected SCHED_HMBIRD: ${{ github.event.inputs.SCHED_HMBIRD }}"
-          echo "Selected UNICODE_BYPASS: ${{ github.event.inputs.UNICODE_BYPASS }}"
-          echo "Selected DROID_SPACES: ${{ github.event.inputs.DROID_SPACES }}"
-          echo "Selected RE_KERNEL: ${{ github.event.inputs.RE_KERNEL }}"
-          echo "Selected LZ4_UPDATE: ${{ github.event.inputs.LZ4_UPDATE }}"
-          echo "Custom BUILD_TIME: $BUILD_TIME"
-          echo "Custom BUILD_USER: ${{ github.event.inputs.BUILD_USER }}"
-          echo "Custom BUILD_HOST: ${{ github.event.inputs.BUILD_HOST }}"
+          printf '%s\n' "$WORKFLOW_INPUTS" | jq -r \
+            'to_entries | sort_by(.key)[] | "Selected \(.key): \(.value // false)"'
           echo -n "BUILD_TIME Unicode: "
           CHECK_TEXT="$BUILD_TIME" python3 "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/check_unicode_format.py" --mode build_time
-          echo "Custom SUFFIX: $SUFFIX"
           echo -n "SUFFIX Unicode: "
           CHECK_TEXT="$SUFFIX" python3 "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/check_unicode_format.py" --mode suffix
 
