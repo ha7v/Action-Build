@@ -206,9 +206,6 @@ jobs:
       CCACHE_IS_KERNEL_COMPILING: "true"
       CCACHE_MAXSIZE: 5G
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Maximize Build Space
         if: ${{ github.event.inputs.SPACE_NOCLEAN == 'false' }}
         uses: easimon/maximize-build-space@master
@@ -220,12 +217,16 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
+      # Checkout after workspace remounting so the exact triggering commit remains visible.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: kernel_workspace/Action-Build
+
       - name: Configure Git
         run: |
           git config --global user.name "Numbersf"
           git config --global user.email "263623064@qq.com"
-          mkdir kernel_workspace && cd kernel_workspace
-          git clone https://github.com/Numbersf/Action-Build.git -b KernelSU
 
       - name: Extract Manifest Info
         id: extract_info
@@ -900,7 +901,7 @@ jobs:
 
             # CONFIG_BT=m makes HCIVHCI a module; declare that generated output to Kleaf.
             if [ -f ../build_with_bazel.py ]; then
-              python3 "${GITHUB_WORKSPACE}/scripts/kleaf_add_module.py" \
+              python3 "${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/scripts/kleaf_add_module.py" \
                 --build-file BUILD.bazel \
                 --module drivers/bluetooth/hci_vhci.ko \
                 --target kernel_aarch64 \
