@@ -1,0 +1,19 @@
+# Standard SysV KABI static patch for official common
+# 仅注释 struct sysv_sem / sysv_shm，防止 KABI 冲突
+# 使用 ANDROID_KABI_USE 适配（官方 common 当前版本）
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index abcdef123456
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -... 
+@@ -...
+
+diff --git a/include/linux/sched/user.h b/include/linux/sched/user.h
+index abcdef123456
+--- a/include/linux/sched/user.h
++++ b/include/linux/sched/user.h
+@@ -...
+@@ ...
+
+# android14-6.1 / android15-6.6 通用适配
