@@ -101,6 +101,16 @@ on:
         description: "自定义构建时间(输入F使用UTCT或-1关闭)//Custom build time (Enter F to use UTCT, or -1 to disable)"
         required: false
         default: "Fri Dec 12 11:37:03 UTC 2025"
+      BUILD_USER:
+        type: string
+        description: "内核编译用户名(留空使用构建环境默认值)//Kernel build user (empty: build environment default)"
+        required: false
+        default: ""
+      BUILD_HOST:
+        type: string
+        description: "内核编译主机名(留空使用构建环境默认值)//Kernel build host (empty: build environment default)"
+        required: false
+        default: ""
       KSU_META:
         type: string
         description: "管理器分支名(必填)/内置分支名(必填)/回退分支提交哈希版本(留空不修改)//Manager Branch name (Required) / Builtin branch name (Required) / Rollback branch commit hash version (Leave blank to not modify)"
@@ -156,10 +166,14 @@ on:
         required: true
         default: false
       DROID_SPACES:
-        type: boolean
-        description: "是否添加轻量级Linux容器支持(DroidSpaces)？//Add lightweight Linux container support (DroidSpaces)?"
+        type: choice
+        description: "DroidSpaces：false 关闭，standard 启用标准容器支持，extend 额外启用 EVDI/虚拟 HCI//DroidSpaces mode"
         required: true
-        default: false
+        default: 'false'
+        options:
+          - 'false'
+          - 'standard'
+          - 'extend'
       RE_KERNEL:
         type: boolean
         description: "是否添加Re-Kernel？//Add Re-Kernel?"
@@ -183,7 +197,7 @@ on:
 
 jobs:
   build:
-    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
+    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES != 'false' && ' [DS]' || '' }}${{ github.event.inputs.DROID_SPACES == 'extend' && ' [DS-EXT]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "none"
@@ -193,9 +207,6 @@ jobs:
       CCACHE_MAXSIZE: 5G
       KSUVER: NoKSU
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Maximize Build Space
         if: ${{ github.event.inputs.SPACE_NOCLEAN == 'false' }}
         uses: easimon/maximize-build-space@master
@@ -207,12 +218,16 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
+      # Resize the workspace before checkout so the triggering commit remains available.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: kernel_workspace/Action-Build
+
       - name: Configure Git
         run: |
           git config --global user.name "Numbersf"
           git config --global user.email "263623064@qq.com"
-          mkdir kernel_workspace && cd kernel_workspace
-          git clone https://github.com/Numbersf/Action-Build.git -b KernelSU
 
       - name: Extract Manifest Info
         id: extract_info
@@ -220,7 +235,7 @@ jobs:
           FILE: ${{ github.event.inputs.FILE }}
         run: |
           set -e
-          cd "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE/kernel_workspace/Action-Build"
           if [[ "$FILE" =~ ^(.+)_([a-zA-Z])$ ]]; then
             FILE_CONF="${BASH_REMATCH[1]}"
           else
@@ -456,7 +471,7 @@ jobs:
         run: |
           cd kernel_workspace
           mkdir -p .repo/manifests
-          cp "$GITHUB_WORKSPACE/.repo/manifests_fallback/${FILE}.xml" ".repo/manifests/${FILE}.xml"
+          cp "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/.repo/manifests_fallback/${FILE}.xml" ".repo/manifests/${FILE}.xml"
           BASE_URL="https://github.com/${MANIFEST_REPO}/${MANIFEST_REPO_NAME}.git"
 
           echo "使用$MANIFEST_REPO/$MANIFEST_REPO_NAME($MANIFEST_BRANCH)初始化仓库..."
@@ -822,39 +837,23 @@ jobs:
       - name: Apply DROID_SPACES
         env:
           FILE: ${{ github.event.inputs.FILE }}
-        if: ${{ github.event.inputs.DROID_SPACES == 'true' }}
+        if: ${{ github.event.inputs.DROID_SPACES != 'false' }}
         run: |
           PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
           cd kernel_workspace/kernel_platform/common
-          # 注释掉原始的 sysv 结构体定义
-          sed -i 's/^\(\t\)struct sysv_sem\b.*sysvsem;/\1\/\/ struct sysv_sem\t\t\tsysvsem;/' include/linux/sched.h
-          sed -i 's/^\(\t\)struct sysv_shm\b.*sysvshm;/\1\/\/ struct sysv_shm\t\t\tsysvshm;/' include/linux/sched.h
-
-          if [ "$KMI" = "android12-5.10" ]; then
-            echo "为 android12-5.10 修复 sysvipc KABI 绕过及 POSIX_MQUEUE ABI 填充问题..."
-            sed -i '/^\tconst struct sched_class\t\*sched_class;/a \\n#ifndef __GENKSYMS__\n\tstruct sysv_sem\t\t\tsysvsem;\n\tstruct sysv_shm\t\t\tsysvshm;\n#endif\n' include/linux/sched.h
-            sed -i 's/^\tunsigned long mq_bytes;\t\/\* How many bytes can be allocated to mqueue[?] \*\//\t\/\/unsigned long mq_bytes;\t\/* How many bytes can be allocated to mqueue? *\//' include/linux/sched/user.h
-            sed -i '/struct ratelimit_state ratelimit;/,/ANDROID_OEM_DATA_ARRAY(1, 2);/{/^\tANDROID_KABI_RESERVE(1);/{N;N;s/^\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);/#if defined(CONFIG_POSIX_MQUEUE)\n\tANDROID_KABI_USE(1, unsigned long mq_bytes);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#endif/}}' include/linux/sched/user.h
-          # 检查 sched.h 并修改 KABI 槽位或指针
-          elif grep -q "sched_dl_entity.*\*dl_server" include/linux/sched.h; then
-            echo "✅ 检测到 dl_server 指针，使用 packed union 方案"
-            sed -i 's|\tstruct sched_entity\t\tse;|#ifdef CONFIG_SYSVIPC\n\tunion {\n\t\tchar __kabi_ignored_0;\n\t\tstruct sysv_sem\t\t\tsysvsem;\n\t}__attribute__((packed));\n\tunion {\n\t\tchar __kabi_ignored_1;\n\t\tstruct sysv_shm\t\t\tsysvshm;\n\t}__attribute__((packed));\n#endif\n\n\tstruct sched_entity\t\tse;|' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_USE(1," include/linux/sched.h; then
-            echo "✅ 检测到 USE(1)，使用槽位 6,7,8"
-            sed -i -e '/ANDROID_KABI_RESERVE(6);/{N;N;s|\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(6, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);\n#endif|;}' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_RESERVE(1);" include/linux/sched.h; then
-            echo "✅ 检测到 RESERVE(1)，使用槽位 1,2,3"
-            sed -i -e '/ANDROID_KABI_RESERVE(1);/{N;N;N;N;N;N;N;s|\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(1, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(2); ANDROID_KABI_RESERVE(3), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n#endif\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|;}' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_RESERVE(3);" include/linux/sched.h; then
-            echo "✅ fallback，使用槽位 3,4,5"
-            sed -i -e '/ANDROID_KABI_RESERVE(3);/{N;N;N;s|\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(3, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(4); ANDROID_KABI_RESERVE(5), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n#endif\n\tANDROID_KABI_RESERVE(6);|;}' include/linux/sched.h
-          else
-            echo "❌ 无法通过上下文精准匹配 KABI 槽位或对应指针"
-            exit 9
-          fi
+          case "$KMI" in
+            android14-6.1|android15-6.6)
+              echo "应用官方 common 对应的静态 SysV KABI 补丁：$KMI"
+              patch -p1 --forward < "${PATCH_DIR}/droidspaces/sysv_kabi_${KMI}.patch"
+              ;;
+            *)
+              echo "DroidSpaces 目前只维护 android14-6.1 和 android15-6.6（当前：$KMI）"
+              exit 10
+              ;;
+          esac
 
           echo "为 oplus_bsp_midas 模块返回幽灵任务以避免空指针崩溃..."
-          patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch" || true
+          patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch"
 
           if [ "$KMI" = "android16-6.12" ]; then
             rm -f include/uapi/linux/ntsync.h
@@ -868,11 +867,25 @@ jobs:
             fi
           fi
           echo "拓展 ntsync 支持..."
-          patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch" || true
+          patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch"
           if [[ "$FILE" == oneplus_10r* ]]; then
-            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch" || true
+            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch"
           else
-            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_$([ -f "${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch" ] && echo "${KMI}_${ANDROID_SHORT_VERSION}" || echo "${KMI}").patch" || true
+            NTSYNC_PATCH="${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch"
+            [ -f "$NTSYNC_PATCH" ] || NTSYNC_PATCH="${PATCH_DIR}/ntsync/ntsync_compat_${KMI}.patch"
+            patch -p1 --forward < "$NTSYNC_PATCH"
+          fi
+
+          if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
+            echo "应用本地、按官方 common 版本适配的 EVDI 补丁：$KMI"
+            patch -p1 --forward < "${PATCH_DIR}/droidspaces/evdi_${KMI}.patch"
+            echo "以模块方式启用虚拟 HCI，并声明 Kleaf 产物"
+            [ -f BUILD.bazel ] || { echo "extend 需要 common/BUILD.bazel 以声明 hci_vhci.ko"; exit 11; }
+            python3 "${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/scripts/kleaf_add_module.py" \
+              --build-file BUILD.bazel \
+              --module drivers/bluetooth/hci_vhci.ko \
+              --target kernel_aarch64 \
+              --target kernel_aarch64_16k
           fi
           source $REJ_CHECKER
           check_rejects .
@@ -1068,7 +1081,7 @@ jobs:
           fi
 
           # DROID_SPACES配置*
-          if [ "${{ github.event.inputs.DROID_SPACES }}" = "true" ]; then
+          if [ "${{ github.event.inputs.DROID_SPACES }}" != "false" ]; then
             set_config "CONFIG_NTSYNC=y"
             set_config "CONFIG_SYSVIPC=y"
             set_config "CONFIG_DEVTMPFS=y"
@@ -1080,6 +1093,11 @@ jobs:
             set_config "CONFIG_NETFILTER_XT_TARGET_REJECT=y"
             set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
             set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
+            if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
+              set_config "CONFIG_BT_HCIVHCI=m"
+              set_config "CONFIG_STATIC_USERMODEHELPER=n"
+              set_config "CONFIG_DRM_LINDROID_EVDI=y"
+            fi
           fi
 
           # IPSET & IPv6_NAT & TTL配置*
@@ -1147,6 +1165,12 @@ jobs:
           fi
           echo "KBUILD_BUILD_TIMESTAMP=${DATESTR}" >> "$GITHUB_ENV"
           echo "KBUILD_BUILD_VERSION=1" >> "$GITHUB_ENV"
+          if [[ -n "${{ github.event.inputs.BUILD_USER }}" ]]; then
+            echo "KBUILD_BUILD_USER=${{ github.event.inputs.BUILD_USER }}" >> "$GITHUB_ENV"
+          fi
+          if [[ -n "${{ github.event.inputs.BUILD_HOST }}" ]]; then
+            echo "KBUILD_BUILD_HOST=${{ github.event.inputs.BUILD_HOST }}" >> "$GITHUB_ENV"
+          fi
           cd kernel_workspace/kernel_platform/
           for f in ./common/scripts/mkcompile_h ./"$KERNEL_REPOS"/scripts/mkcompile_h; do
             if [ -f "$f" ]; then
@@ -1456,6 +1480,7 @@ jobs:
           cp ksu_module_susfs_1.5.2+_Release.zip ./AnyKernel3/
 
       - name: Download Latest KernelSU APK from CI
+        if: ${{ github.event.inputs.BUILTIN_KSU == 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1484,7 +1509,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.BUILTIN_KSU == 'true' && github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES != 'false' && '_DS' || '' }}${{ github.event.inputs.DROID_SPACES == 'extend' && '_EXT' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
