@@ -877,15 +877,11 @@ jobs:
           fi
 
           if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
-            echo "应用本地、按官方 common 版本适配的 EVDI 补丁：$KMI"
-            patch -p1 --forward < "${PATCH_DIR}/droidspaces/evdi_${KMI}.patch"
-            echo "以模块方式启用虚拟 HCI，并声明 Kleaf 产物"
-            [ -f BUILD.bazel ] || { echo "extend 需要 common/BUILD.bazel 以声明 hci_vhci.ko"; exit 11; }
-            python3 "${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/scripts/kleaf_add_module.py" \
-              --build-file BUILD.bazel \
-              --module drivers/bluetooth/hci_vhci.ko \
-              --target kernel_aarch64 \
-              --target kernel_aarch64_16k
+            echo "安装 extend 专属 EVDI 源码并注册 DRM 集成"
+            python3 "${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/scripts/install_droidspaces_evdi.py" \
+              --common "$PWD" \
+              --source-dir "${PATCH_DIR}/droidspaces/evdi"
+
           fi
           source $REJ_CHECKER
           check_rejects .
@@ -1094,7 +1090,7 @@ jobs:
             set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
             set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
             if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
-              set_config "CONFIG_BT_HCIVHCI=m"
+              set_config "CONFIG_BT_HCIVHCI=y"
               set_config "CONFIG_STATIC_USERMODEHELPER=n"
               set_config "CONFIG_DRM_LINDROID_EVDI=y"
             fi
