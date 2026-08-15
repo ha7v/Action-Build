@@ -167,7 +167,7 @@ on:
         default: false
       DROID_SPACES:
         type: choice
-        description: "DroidSpaces：false 关闭，standard 启用标准容器支持，extend 额外启用 EVDI/虚拟 HCI//DroidSpaces mode"
+        description: "DroidSpaces容器支持：false关闭，standard开启容器+NTSYNC，extend为6.1/6.6增加虚拟HCI/EVDI测试支持//DroidSpaces mode"
         required: true
         default: 'false'
         options:
@@ -218,7 +218,7 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      # Resize the workspace before checkout so the triggering commit remains available.
+      # Checkout after workspace remounting so the exact triggering commit remains visible.
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -341,6 +341,7 @@ jobs:
 
       - name: Debug Show Selected Inputs
         env:
+          WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
           BUILD_TIME: ${{ github.event.inputs.BUILD_TIME }}
           SUFFIX: ${{ github.event.inputs.SUFFIX }}
         run: |
@@ -350,27 +351,10 @@ jobs:
           echo "Selected CPUD: ${{ env.CPUD }}"
           echo "Selected ANDROID_VERSION: ${{ env.ANDROID_VERSION }}"
           echo "Selected BUILD_METHOD: ${{ env.BUILD_METHOD }}"
-          echo "Selected BUILTIN_KSU: ${{ github.event.inputs.BUILTIN_KSU }}"
-          echo "Selected FILE: ${{ github.event.inputs.FILE }}"
-          echo "Selected SUSFS_CI: ${{ github.event.inputs.SUSFS_CI }}"
-          echo "Selected KPM: ${{ github.event.inputs.KPM }}"
-          echo "Custom SUSFS_META: ${{ github.event.inputs.SUSFS_META }}"
-          echo "Custom KSU_META: ${{ github.event.inputs.KSU_META }}"
-          echo "Selected ZRAM: ${{ github.event.inputs.ZRAM }}"
-          echo "Selected LSM_BBG: ${{ github.event.inputs.LSM_BBG }}"
-          echo "Selected NETFILTER: ${{ github.event.inputs.NETFILTER }}"
-          echo "Selected CCM: ${{ github.event.inputs.CCM }}"
-          echo "Selected SUSFS_DEV: ${{ github.event.inputs.SUSFS_DEV }}"
-          echo "Selected FAST_BUILD: ${{ github.event.inputs.FAST_BUILD }}"
-          echo "Selected SCHED_HMBIRD: ${{ github.event.inputs.SCHED_HMBIRD }}"
-          echo "Selected UNICODE_BYPASS: ${{ github.event.inputs.UNICODE_BYPASS }}"
-          echo "Selected DROID_SPACES: ${{ github.event.inputs.DROID_SPACES }}"
-          echo "Selected RE_KERNEL: ${{ github.event.inputs.RE_KERNEL }}"
-          echo "Selected LZ4_UPDATE: ${{ github.event.inputs.LZ4_UPDATE }}"
-          echo "Custom BUILD_TIME: $BUILD_TIME"
+          printf '%s\n' "$WORKFLOW_INPUTS" | jq -r \
+            'to_entries | sort_by(.key)[] | "Selected \(.key): \(.value // false)"'
           echo -n "BUILD_TIME Unicode: "
           CHECK_TEXT="$BUILD_TIME" python3 "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/check_unicode_format.py" --mode build_time
-          echo "Custom SUFFIX: $SUFFIX"
           echo -n "SUFFIX Unicode: "
           CHECK_TEXT="$SUFFIX" python3 "$GITHUB_WORKSPACE/kernel_workspace/Action-Build/scripts/check_unicode_format.py" --mode suffix
 
@@ -821,6 +805,15 @@ jobs:
           source $REJ_CHECKER
           check_rejects .
 
+      - name: Apply CVE_2026_43499 RTMUTEX fix
+        if: ${{ env.KMI == 'android14-6.1' }}
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          PATCH_URL="https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8650/main/other_patch/cve-2026-43499-rtmutex-6.1.patch"
+          curl -fL --retry 3 --retry-all-errors "$PATCH_URL" | patch -p1 -F 3
+          source $REJ_CHECKER
+          check_rejects .
+
       - name: Apply RE_KERNEL
         if: ${{ github.event.inputs.RE_KERNEL == 'true' }}
         run: |
@@ -841,19 +834,35 @@ jobs:
         run: |
           PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
           cd kernel_workspace/kernel_platform/common
-          case "$KMI" in
-            android14-6.1|android15-6.6)
-              echo "应用官方 common 对应的静态 SysV KABI 补丁：$KMI"
-              patch -p1 --forward < "${PATCH_DIR}/droidspaces/sysv_kabi_${KMI}.patch"
-              ;;
-            *)
-              echo "DroidSpaces 目前只维护 android14-6.1 和 android15-6.6（当前：$KMI）"
-              exit 10
-              ;;
-          esac
+          # 注释掉原始的 sysv 结构体定义
+          sed -i 's/^\(\t\)struct sysv_sem\b.*sysvsem;/\1\/\/ struct sysv_sem\t\t\tsysvsem;/' include/linux/sched.h
+          sed -i 's/^\(\t\)struct sysv_shm\b.*sysvshm;/\1\/\/ struct sysv_shm\t\t\tsysvshm;/' include/linux/sched.h
+
+          if [ "$KMI" = "android12-5.10" ]; then
+            echo "为 android12-5.10 修复 sysvipc KABI 绕过及 POSIX_MQUEUE ABI 填充问题..."
+            sed -i '/^\tconst struct sched_class\t\*sched_class;/a \\n#ifndef __GENKSYMS__\n\tstruct sysv_sem\t\t\tsysvsem;\n\tstruct sysv_shm\t\t\tsysvshm;\n#endif\n' include/linux/sched.h
+            sed -i 's/^\tunsigned long mq_bytes;\t\/\* How many bytes can be allocated to mqueue[?] \*\//\t\/\/unsigned long mq_bytes;\t\/* How many bytes can be allocated to mqueue? *\//' include/linux/sched/user.h
+            sed -i '/struct ratelimit_state ratelimit;/,/ANDROID_OEM_DATA_ARRAY(1, 2);/{/^\tANDROID_KABI_RESERVE(1);/{N;N;s/^\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);/#if defined(CONFIG_POSIX_MQUEUE)\n\tANDROID_KABI_USE(1, unsigned long mq_bytes);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#endif/}}' include/linux/sched/user.h
+          # 检查 sched.h 并修改 KABI 槽位或指针
+          elif grep -q "sched_dl_entity.*\*dl_server" include/linux/sched.h; then
+            echo "✅ 检测到 dl_server 指针，使用 packed union 方案"
+            sed -i 's|\tstruct sched_entity\t\tse;|#ifdef CONFIG_SYSVIPC\n\tunion {\n\t\tchar __kabi_ignored_0;\n\t\tstruct sysv_sem\t\t\tsysvsem;\n\t}__attribute__((packed));\n\tunion {\n\t\tchar __kabi_ignored_1;\n\t\tstruct sysv_shm\t\t\tsysvshm;\n\t}__attribute__((packed));\n#endif\n\n\tstruct sched_entity\t\tse;|' include/linux/sched.h
+          elif grep -q "ANDROID_KABI_USE(1," include/linux/sched.h; then
+            echo "✅ 检测到 USE(1)，使用槽位 6,7,8"
+            sed -i -e '/ANDROID_KABI_RESERVE(6);/{N;N;s|\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(6, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);\n#endif|;}' include/linux/sched.h
+          elif grep -q "ANDROID_KABI_RESERVE(1);" include/linux/sched.h; then
+            echo "✅ 检测到 RESERVE(1)，使用槽位 1,2,3"
+            sed -i -e '/ANDROID_KABI_RESERVE(1);/{N;N;N;N;N;N;N;s|\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(1, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(2); ANDROID_KABI_RESERVE(3), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n#endif\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|;}' include/linux/sched.h
+          elif grep -q "ANDROID_KABI_RESERVE(3);" include/linux/sched.h; then
+            echo "✅ fallback，使用槽位 3,4,5"
+            sed -i -e '/ANDROID_KABI_RESERVE(3);/{N;N;N;s|\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(3, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(4); ANDROID_KABI_RESERVE(5), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n#endif\n\tANDROID_KABI_RESERVE(6);|;}' include/linux/sched.h
+          else
+            echo "❌ 无法通过上下文精准匹配 KABI 槽位或对应指针"
+            exit 9
+          fi
 
           echo "为 oplus_bsp_midas 模块返回幽灵任务以避免空指针崩溃..."
-          patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch"
+          patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch" || true
 
           if [ "$KMI" = "android16-6.12" ]; then
             rm -f include/uapi/linux/ntsync.h
@@ -867,21 +876,26 @@ jobs:
             fi
           fi
           echo "拓展 ntsync 支持..."
-          patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch"
+          patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_base.patch" || true
           if [[ "$FILE" == oneplus_10r* ]]; then
-            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch"
+            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_android12-5.10_14.patch" || true
           else
-            NTSYNC_PATCH="${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch"
-            [ -f "$NTSYNC_PATCH" ] || NTSYNC_PATCH="${PATCH_DIR}/ntsync/ntsync_compat_${KMI}.patch"
-            patch -p1 --forward < "$NTSYNC_PATCH"
+            patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_$([ -f "${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch" ] && echo "${KMI}_${ANDROID_SHORT_VERSION}" || echo "${KMI}").patch" || true
           fi
 
           if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
-            echo "安装 extend 专属 EVDI 源码并注册 DRM 集成"
+            case "$KMI" in
+              android14-6.1|android15-6.6)
+                ;;
+              *)
+                echo "DroidSpaces extend supports android14-6.1 and android15-6.6 only (current: $KMI)"
+                exit 10
+                ;;
+            esac
+            echo "Installing DroidSpaces extend sources from the triggering commit"
             python3 "${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/scripts/install_droidspaces_evdi.py" \
               --common "$PWD" \
               --source-dir "${PATCH_DIR}/droidspaces/evdi"
-
           fi
           source $REJ_CHECKER
           check_rejects .
@@ -1003,35 +1017,29 @@ jobs:
           }
           trap 'inject_fake_config' EXIT
 
-          # KernelSU配置
           if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ]; then
             set_config "CONFIG_KSU=y"
-          fi
 
-          # KPM配置
-          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ]; then
             if [ "${{ github.event.inputs.KPM }}" = "KPM" ] || [ "${{ github.event.inputs.KPM }}" = "N/A" ]; then
               set_config "CONFIG_KPM=y"
-            fi
-            if [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
+            elif [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
               set_config "CONFIG_KPM=n"
             fi
-          fi
 
-          # SUSFS配置
-          if [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ] && [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
-            set_config "CONFIG_KSU_SUSFS=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_MAP=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            set_config "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-            set_config "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            set_config "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
-            set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
-            set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
-            set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-          elif [ "${{ github.event.inputs.BUILTIN_KSU }}" = "true" ]; then
-            set_config "CONFIG_KSU_SUSFS=n"
+            if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
+              set_config "CONFIG_KSU_SUSFS=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_PATH=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_MAP=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+              set_config "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+              set_config "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+              set_config "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
+              set_config "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+              set_config "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+              set_config "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+            else
+              set_config "CONFIG_KSU_SUSFS=n"
+            fi
           fi
 
           # TMPFS配置*
@@ -1090,6 +1098,8 @@ jobs:
             set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
             set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
             if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
+              # BT_HCIVHCI is bounded by CONFIG_BT; BT=m would force it to m.
+              set_config "CONFIG_BT=y"
               set_config "CONFIG_BT_HCIVHCI=y"
               set_config "CONFIG_STATIC_USERMODEHELPER=n"
               set_config "CONFIG_DRM_LINDROID_EVDI=y"

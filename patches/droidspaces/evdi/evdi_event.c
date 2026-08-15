@@ -38,7 +38,7 @@ static void evdi_inflight_req_pool_free(void *element, void *pool_data)
 static void *evdi_gralloc_data_alloc(gfp_t gfp_mask, void *pool_data)
 {
 	struct evdi_gralloc_data *gralloc;
-	
+
 	gralloc = kvzalloc(sizeof(struct evdi_gralloc_data), gfp_mask);
 
 	return gralloc;
@@ -499,7 +499,7 @@ static inline bool evdi_event_queue_lockfree(struct evdi_device *evdi, struct ev
 	first = evdi_events_inc_and_test_first(evdi);
 	atomic64_inc(&evdi->events.events_queued);
 	EVDI_PERF_INC64(&evdi_perf.event_queue_ops);
-	
+
 	evdi_smp_wmb();
 
 	if (likely(first))
@@ -623,8 +623,8 @@ struct evdi_event *evdi_event_dequeue(struct evdi_device *evdi)
 	struct evdi_event *event = NULL;
 	bool empty;
 
- 	if (unlikely(!evdi))
- 		return NULL;
+	if (unlikely(!evdi))
+		return NULL;
 
 	if (unlikely(atomic_read_acquire(&evdi->events.cleanup_in_progress))) {
 		spin_lock(&evdi->events.lock);
@@ -750,7 +750,7 @@ void evdi_event_cleanup_file(struct evdi_device *evdi, struct drm_file *file)
 		}
 		event = next;
 	}
-	
+
 	WRITE_ONCE(evdi->events.head, new_head);
 	WRITE_ONCE(evdi->events.tail, new_tail);
 	if (sp_removed)
@@ -764,7 +764,7 @@ void evdi_event_cleanup_file(struct evdi_device *evdi, struct drm_file *file)
 		atomic_set(&evdi->events.wake_pending, 0);
 
 	wake_up_interruptible(&evdi->events.wait_queue);
-	
+
 	if (lf_removed || sp_removed)
 		evdi_debug("Cleaned up %d events for closed file (lf:%d sp:%d)",
 			   lf_removed + sp_removed, lf_removed, sp_removed);
