@@ -7,10 +7,11 @@
 
 ## 本 fork 的本地改进
 
-本 fork 只维护两项本地改进：
+本 fork 与 DroidSpaces 相关的本地改进只有一项：
 
-- `BUILTIN_KSU=false`：完全跳过内置 KernelSU；
-- `DROID_SPACES=extend`：在已验证可正常使用的官方 DroidSpaces `standard` 支持上增加 `extend` 功能。
+- `DROID_SPACES=extend`：在官方原版 DroidSpaces `standard` 支持上增加 `extend` 功能。
+
+`BUILTIN_KSU=false` 是独立的构建选项，不属于 DroidSpaces `standard` 或 `extend` 的实现范围。
 
 重点维护设备：
 
@@ -23,15 +24,11 @@
 
 ### standard
 
-`standard` 是基线，不属于 `extend` 增量，包括：
+`standard` 完全采用官方原版实现，不属于本 fork 的维护范围，也不属于本 fork 的 `extend`
+增量。官方原版的 SysV IPC KABI、Midas、NTSYNC、namespace、IPC、devtmpfs、POSIX mqueue、
+网络配置及其编译方式均应保持原样。
 
-- 按 KMI 和官方 common 版本管理的 SysV IPC KABI 静态补丁；
-- Midas 修复；
-- NTSYNC 兼容；
-- 容器所需的 namespace、IPC、devtmpfs、POSIX mqueue 和网络配置。
-
-SysV KABI 不得继续使用工作流中基于 `grep`/`sed` 猜测槽位的复杂逻辑，必须使用进入本仓库
-并按 KMI 管理的静态补丁。
+本 fork 不重写、替换、固定或清理 `standard` 的实现；合并改动时以官方 `standard` 行为为准。
 
 ### extend
 
@@ -42,7 +39,8 @@ SysV KABI 不得继续使用工作流中基于 `grep`/`sed` 猜测槽位的复�
   输出声明；
 - `CONFIG_STATIC_USERMODEHELPER=n`。
 
-extend 的源码和补丁必须进入本仓库并按 KMI 管理。不得顺带引入另一个项目的 common fork、固定 commit、无关补丁、无关基线或无关功能。
+extend 的源码和必要集成改动必须进入本仓库并按 KMI 管理。不得顺带引入另一个项目的
+common fork、固定 commit、无关补丁、无关基线或无关功能，也不得改变官方 `standard` 的行为。
 
 ## 工作流、脚本和补丁纪律
 
@@ -50,7 +48,7 @@ extend 的源码和补丁必须进入本仓库并按 KMI 管理。不得顺带�
 - CI 不得运行时克隆本仓库上游或从功能上游 `main` 下载、替换官方 common、源码或补丁。
 - 补丁失败、产生 reject、重复应用或目标文件缺失时必须显式失败；禁止使用 `|| true` 掩盖。
 - 复杂解析和文件变换必须放入独立脚本，不继续扩大工作流内联代码。
-- 新增 extend 代码不得改变 standard 基线或其他设备的原有行为。
+- 新增或修改的 extend 代码不得改变官方 `standard` 或其他设备的原有行为。
 
 ## CI 约定
 
@@ -64,6 +62,6 @@ extend 的源码和补丁必须进入本仓库并按 KMI 管理。不得顺带�
 - 通用修改：运行 `git diff --check`；
 - 修改 Python 脚本：对实际修改的脚本运行 `python3 -m py_compile`；
 - 修改工作流：解析 YAML，并检查关键 `run` 脚本；
-- 修改 DroidSpaces 或 KMI 逻辑：分别用 `android14-6.1` 和 `android15-6.6` 的代表性
-  结构验证；
+- 修改 DroidSpaces `extend` 或其 KMI 集成逻辑：分别用 `android14-6.1` 和 `android15-6.6`
+  的代表性结构验证；
 - 分别记录补丁应用、编译、产物检查和设备启动结果；编译成功不等于可启动。

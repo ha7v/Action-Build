@@ -1098,11 +1098,35 @@ jobs:
             set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
             set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
             if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
+              # Pure Kleaf uses the device repository's defconfig as the base.
+              # Keep standard on the official common config path, but put the
+              # extend-only settings in the defconfig actually consumed by
+              # the Qualcomm build.
+              EXTEND_CONFIG_FILE=""
+              if [ -n "${KERNEL_REPOS:-}" ] && [ -f "../${KERNEL_REPOS}/arch/arm64/configs/gki_defconfig" ]; then
+                EXTEND_CONFIG_FILE="../${KERNEL_REPOS}/arch/arm64/configs/gki_defconfig"
+              elif [ -f "../msm-kernel/arch/arm64/configs/gki_defconfig" ]; then
+                EXTEND_CONFIG_FILE="../msm-kernel/arch/arm64/configs/gki_defconfig"
+              fi
+              if [ -z "$EXTEND_CONFIG_FILE" ]; then
+                echo "❌ extend requires the device gki_defconfig, but none was found"
+                exit 14
+              fi
+              echo "✅ extend config target: $EXTEND_CONFIG_FILE"
+
+              set_extend_config() {
+                local val="$1"
+                local saved_config_file="$CONFIG_FILE"
+                CONFIG_FILE="$EXTEND_CONFIG_FILE"
+                set_config "$val"
+                CONFIG_FILE="$saved_config_file"
+              }
+
               # BT_HCIVHCI is bounded by CONFIG_BT; BT=m would force it to m.
-              set_config "CONFIG_BT=y"
-              set_config "CONFIG_BT_HCIVHCI=y"
-              set_config "CONFIG_STATIC_USERMODEHELPER=n"
-              set_config "CONFIG_DRM_LINDROID_EVDI=y"
+              set_extend_config "CONFIG_BT=y"
+              set_extend_config "CONFIG_BT_HCIVHCI=y"
+              set_extend_config "CONFIG_STATIC_USERMODEHELPER=n"
+              set_extend_config "CONFIG_DRM_LINDROID_EVDI=y"
             fi
           fi
 
